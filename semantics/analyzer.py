@@ -483,6 +483,16 @@ class SemanticAnalyzer(ImageLangVisitor):
                 self.errors.append(make_error(tok, f"Undeclared identifier '{name}'"))
                 return None
             return sym.type
+        if ctx.type_() and ctx.getToken(ImageLangParser.LPAREN, 0):
+            t = self.type_from_ctx(ctx.type_())
+            
+            if ctx.arg_list():
+                for e in ctx.arg_list().expression():
+                    arg_t = self.visit(e)
+                    if arg_t and not arg_t.is_numeric():
+                        self.errors.append(make_error(e.start, f"Constructor arguments must be numeric, got {arg_t}"))
+            
+            return t
         if ctx.getToken(ImageLangParser.LPAREN, 0):
             return self.visit(ctx.expression())
         if ctx.func_call():

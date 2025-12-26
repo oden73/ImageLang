@@ -22,6 +22,20 @@ namespace ImageLangRuntime
 
     public static class Ops
     {
+        public static object CreateColor(object r, object g, object b) {
+            return new LangColor(
+                (int)Convert.ToDouble(r), 
+                (int)Convert.ToDouble(g), 
+                (int)Convert.ToDouble(b)
+            );
+        }
+
+        public static object CreateImage(object w, object h) {
+            int width = (int)Convert.ToDouble(w);
+            int height = (int)Convert.ToDouble(h);
+            return new ImageWrapper(new Bitmap(width, height));
+        }
+
         public static object Add(object a, object b) {
             if (a is string || b is string) return $"{a}{b}";
             if (a is ImageWrapper i1 && b is ImageWrapper i2) return StdLib.add_images(i1, i2);
@@ -32,7 +46,6 @@ namespace ImageLangRuntime
         public static object Sub(object a, object b) {
             if (a is ImageWrapper i1 && b is ImageWrapper i2) return StdLib.sub_images(i1, i2);
             
-            // Debug для проверки null
             if (a is ImageWrapper && b == null) { Console.WriteLine("[Runtime Error] Sub: second image is null!"); return a; }
             if (a == null && b is ImageWrapper) { Console.WriteLine("[Runtime Error] Sub: first image is null!"); return b; }
 
@@ -54,7 +67,7 @@ namespace ImageLangRuntime
 
         public static object Neg(object a) {
             double d = ToDouble(a);
-            // Если исходное было int, вернем int. Иначе double.
+            
             return IsInt(a) ? (object)(int)(-d) : -d;
         }
         
@@ -65,13 +78,10 @@ namespace ImageLangRuntime
         public static object Eq(object a, object b) 
         {
             if (a == null && b == null) return true;
-            if (a == null || b == null) return false;
-            // Для чисел сравнение через Equals может сбоить (int vs double),
-            // но для базового теста хватит.
+            if (a == null || b == null) return false;            
             return a.Equals(b);
         }
 
-        // Обертки
         public static object Load(object path) => StdLib.load(path?.ToString());
         public static void Save(object img, object path) => StdLib.save(img as ImageWrapper, path?.ToString());
         public static object Pow(object img, object g) => StdLib.pow_channels(img as ImageWrapper, ToDouble(g));
@@ -120,15 +130,13 @@ namespace ImageLangRuntime
         {
             if (img == null) return null;
             
-            // Если радиус маленький, нет смысла размывать
+            
             int radius = (int)Math.Ceiling(r);
             if (radius < 1) return new ImageWrapper((Bitmap)img.Bitmap.Clone());
 
             Bitmap src = img.Bitmap;
             Bitmap dest = new Bitmap(src.Width, src.Height);
 
-            // Простой алгоритм Box Blur (усрелнение соседей)
-            // Это не самый быстрый способ (GetPixel медленный), но для лабы идеально понятный
             for (int x = 0; x < src.Width; x++)
             {
                 for (int y = 0; y < src.Height; y++)
@@ -136,12 +144,10 @@ namespace ImageLangRuntime
                     long rSum = 0, gSum = 0, bSum = 0;
                     int count = 0;
 
-                    // Проходим по соседям от (x-radius) до (x+radius)
                     for (int kx = x - radius; kx <= x + radius; kx++)
                     {
                         for (int ky = y - radius; ky <= y + radius; ky++)
                         {
-                            // Проверка границ изображения
                             if (kx >= 0 && kx < src.Width && ky >= 0 && ky < src.Height)
                             {
                                 Color c = src.GetPixel(kx, ky);
@@ -153,7 +159,7 @@ namespace ImageLangRuntime
                         }
                     }
 
-                    // Записываем среднее значение
+                    
                     dest.SetPixel(x, y, Color.FromArgb(
                         (int)(rSum / count),
                         (int)(gSum / count),
@@ -168,7 +174,7 @@ namespace ImageLangRuntime
             long sum = 0;
             int w = img.Bitmap.Width;
             int h = img.Bitmap.Height;
-            if (w == 0 || h == 0) return 0.0; // Защита от NaN
+            if (w == 0 || h == 0) return 0.0; 
 
             for(int x=0; x<w; x++) for(int y=0; y<h; y++) {
                 Color c = img.Bitmap.GetPixel(x, y);
@@ -198,7 +204,7 @@ namespace ImageLangRuntime
             for (int x = 0; x < w; x++) for (int y = 0; y < h; y++) {
                 Color c1 = a.Bitmap.GetPixel(x, y);
                 Color c2 = b.Bitmap.GetPixel(x, y);
-                // ИСПОЛЬЗУЕМ МОДУЛЬ РАЗНОСТИ (Math.Abs)
+                
                 res.SetPixel(x, y, Color.FromArgb(
                     Clamp(Math.Abs(c1.R - c2.R)), 
                     Clamp(Math.Abs(c1.G - c2.G)), 
