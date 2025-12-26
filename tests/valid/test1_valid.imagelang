@@ -1,0 +1,22 @@
+image adjust_gamma(image& img, float& gamma) {
+  img = pow_channels(img, 1.0 / gamma);
+  return img;
+}
+
+{
+  write("Enter path to the image");
+  string path = read(string);
+  image img = load(path);
+
+  if img == null then {
+    write("Error: Image is not found");
+  } else {
+    float g = 2.2;
+    img = adjust_gamma(img, g);
+
+    img = img * 1.1;
+
+    save(img, "out.png");
+    write("Image saved: out1.png");
+  }
+}

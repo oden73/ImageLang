@@ -1,0 +1,27 @@
+// Subprogram
+float avg_brightness(image& img) {
+  int w = width(img);
+  int h = height(img);
+  float sum = 0.0;
+  int count = 0;
+
+  for int y = 0; y < h; y = y + 1 do {
+    for int x = 0; x < w; x = x + 1 do {
+      color c = get_pixel(img, x, y);
+      float yval = 0.2126 * (float)c.r + 0.7152 * (float)c.g + 0.0722 * (float)c.b;
+      sum = sum + yval;
+      count = count + 1;
+    }
+  }
+  return sum / (float)count;
+}
+
+{
+  image img = load("input.jpg");
+  if img != null then {
+    float avg = avg_brightness(img);
+    write("Average brightness: " + (string)avg);
+  } else {
+    write("Load error");
+  }
+}

@@ -1,0 +1,30 @@
+bool is_converged(image& img1, image& img2, float& eps) {
+  float d = avg(img1 - img2);
+  write("DEBUG: d = " + (string)d + ", eps = " + (string)eps);
+  if d < eps then {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+{
+  image img = load("input.jpg");
+  if img == null then {
+    write("No image");
+  } else {
+    image prev = blur(img, 0.0);
+    prev = prev * 0.0;
+    float eps = 0.25;
+    int iter = 0;
+
+    until is_converged(img, prev, eps) do {
+      prev = img;
+      img = blur(img, 1.0);   // comment
+      iter = iter + 1;
+    }
+
+    write("Processing ended by " + (string)iter + " iterations");
+    save(img, "out.png");
+  }
+}

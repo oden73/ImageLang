@@ -1,0 +1,13 @@
+{
+    int a = 0;
+    if a == -1 then {
+        throw ValueError("bad");
+    }
+    try {
+        a = a - 1;
+    } except ValueError e {
+        a = a + 1;
+    } except {
+        a = a + 3;
+    }
+}

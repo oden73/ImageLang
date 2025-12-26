@@ -1,0 +1,4 @@
+{
+    vector<int> v;
+    v["abc"] = 1;
+}
