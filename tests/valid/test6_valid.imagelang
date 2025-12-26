@@ -1,0 +1,10 @@
+image adjust(image& img) {
+    img = img * 1.5;
+    return img;
+}
+
+{
+    image my_img = load("input.png");
+    adjust(my_img);
+    save(my_img, "out.png");
+}
