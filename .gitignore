@@ -23,7 +23,7 @@ program.exe
 program.il
 ImageLangRuntime.dll
 out.png
-_LAUNCH.txt
+*.txt
 input.jpg
 
 .qodo/
