@@ -18,15 +18,20 @@ class Compiler(ImageLangVisitor):
             "color": "valuetype [ImageLangRuntime]ImageLangRuntime.LangColor"
         }
 
+        self.function_metadata = {}
+
     def get_il(self): return "\n".join(self.il_code)
+    
     def emit(self, instr): self.il_code.append(f"    {instr}")
+    
     def emit_label(self, lbl): self.il_code.append(f"{lbl}:")
+    
     def new_label(self):
         self.label_counter += 1
         return f"L_{self.label_counter}"
+    
     def map_type(self, t): return self.type_mapping.get(t, "object")
 
-    # --- Locals ---
     def reset_scope(self):
         self.locals_map = {}
         self.locals_type_map = {}
@@ -58,7 +63,7 @@ class Compiler(ImageLangVisitor):
         decls = [f"[{idx}] {self.locals_type_map[name]} {name}" for name, idx in sorted(self.locals_map.items(), key=lambda x: x[1])]
         self.emit(f".locals init ({', '.join(decls)})")
 
-    # --- Helpers ---
+    
     def emit_unbox(self, t):
         if t == "int32": self.emit("unbox.any [mscorlib]System.Int32")
         elif t == "float64": self.emit("unbox.any [mscorlib]System.Double")
@@ -73,13 +78,28 @@ class Compiler(ImageLangVisitor):
         elif t == "bool": self.emit("box [mscorlib]System.Boolean")
         elif "valuetype" in t: self.emit(f"box {t.replace('valuetype ', '')}")
 
-    # --- Program ---
+    
     def visitProgram(self, ctx):
         self.il_code = [
             ".assembly extern mscorlib {}", ".assembly extern System.Drawing {}",
             ".assembly extern ImageLangRuntime {}", ".assembly ImageLangProgram {}",
             ".module program.exe", ".class public auto ansi Program extends [mscorlib]System.Object {"
         ]
+
+        self.function_metadata = {}
+
+        for td in ctx.top_decl():
+            f_ctx = td.func_decl()
+            f_name = f_ctx.ID().getText()
+            param_modes = []
+            if f_ctx.param_list():
+                for p in f_ctx.param_list().param():
+                    is_ref = p.getToken(ImageLangParser.AMP, 0) is not None
+                    param_modes.append(is_ref)
+            
+            # Сохраняем список режимов параметров
+            self.function_metadata[f_name] = param_modes
+
         for td in ctx.top_decl(): self.visit(td)
         self.il_code.append(".method static void Main() cil managed { .entrypoint")
         self.in_main = True
@@ -92,36 +112,52 @@ class Compiler(ImageLangVisitor):
         self.il_code.append("} }")
 
     def visitMain_block(self, ctx): self.visit(ctx.block())
+
     def visitBlock(self, ctx): 
         for s in ctx.stmt(): self.visit(s)
 
-    # --- Functions ---
     def visitFunc_decl(self, ctx):
         name = ctx.ID().getText()
         self.reset_scope()
         self.scan_locals(ctx)
         
-        # Сигнатура: все аргументы object, возврат object
-        args_cnt = len(ctx.param_list().param()) if ctx.param_list() else 0
-        sig = ", ".join(["object"] * args_cnt)
+        params_info = []
+        if ctx.param_list():
+            for p in ctx.param_list().param():
+                is_ref = p.getToken(ImageLangParser.AMP, 0) is not None
+                params_info.append((p.ID().getText(), is_ref))
+        
+        sig_parts = []
+        for _, is_ref in params_info:
+            sig_parts.append("object&" if is_ref else "object")
+        sig = ", ".join(sig_parts)
+        
         self.il_code.append(f".method public static object {name}({sig}) cil managed {{")
         self.emit_locals_init()
 
-        # Копируем аргументы в локальные
-        if ctx.param_list():
-            for i, p in enumerate(ctx.param_list().param()):
-                name = p.ID().getText()
-                t = self.locals_type_map[name]
-                self.emit(f"ldarg {i}")
-                self.emit_unbox(t)
-                self.emit(f"stloc {self.locals_map[name]}")
+        for i, (p_name, is_ref) in enumerate(params_info):
+            t = self.locals_type_map[p_name]
+            self.emit(f"ldarg {i}")
+            if is_ref:
+                self.emit("ldind.ref")
+            
+            self.emit_unbox(t)
+            self.emit(f"stloc {self.locals_map[p_name]}")
 
         self.visit(ctx.block())
+
+        for i, (p_name, is_ref) in enumerate(params_info):
+            if is_ref:
+                t = self.locals_type_map[p_name]
+                self.emit(f"ldarg {i}")
+                self.emit(f"ldloc {self.locals_map[p_name]}")
+                self.emit_box_if_needed(t)
+                self.emit("stind.ref")
+
         self.emit("ldnull")
         self.emit("ret")
         self.il_code.append("}")
-
-    # --- Statements ---
+    
     def visitVar_decl(self, ctx):
         if ctx.expression():
             self.visit(ctx.expression())
@@ -186,30 +222,24 @@ class Compiler(ImageLangVisitor):
         hdr = ctx.for_header()
         start, end = self.new_label(), self.new_label()
         
-        # 1. Инициализация (var_decl)
         if hdr.var_decl(): 
             self.visit(hdr.var_decl())
         
         self.emit_label(start)
-        
-        # 2. Условие (expression)
-        # Внимание: В твоей грамматике выражение ровно одно, поэтому индексы (0) не нужны!
+                
         if hdr.expression():
             self.visit(hdr.expression())
             self.emit_unbox("bool")
             self.emit(f"brfalse {end}")
             
-        # 3. Тело цикла
         self.visit(ctx.block())
         
-        # 4. Шаг (assignment)
         if hdr.assignment(): 
             self.visit(hdr.assignment())
              
         self.emit(f"br {start}")
         self.emit_label(end)
 
-    # --- EXPRESSIONS ---
     def emit_op(self, ctx, name):
         self.visit(ctx.expression(0))
         self.visit(ctx.expression(1))
@@ -221,14 +251,11 @@ class Compiler(ImageLangVisitor):
     def visitDivExpr(self, ctx): self.emit_op(ctx, "Div")
     def visitEqExpr(self, ctx): self.emit_op(ctx, "Eq")
     def visitLtExpr(self, ctx): self.emit_op(ctx, "Lt")
-    def visitGtExpr(self, ctx): self.emit_op(ctx, "Gt")
-    
-    # !!! КЛЮЧЕВОЙ МОМЕНТ для грамматики !!!
-    # Цепочка: expression -> unary -> postfix -> primary
+    def visitGtExpr(self, ctx): self.emit_op(ctx, "Gt")    
     
     def visitUnary_expr(self, ctx):
         if ctx.getToken(ImageLangParser.MINUS, 0):
-            self.visit(ctx.unary_expr()) # На стеке Object
+            self.visit(ctx.unary_expr()) 
             self.emit("call object [ImageLangRuntime]ImageLangRuntime.Ops::Neg(object)")
         elif ctx.cast_expr(): 
             self.visit(ctx.cast_expr())
@@ -279,8 +306,25 @@ class Compiler(ImageLangVisitor):
 
     def visitFunc_call(self, ctx):
         name = ctx.ID().getText()
+        is_builtin = name in ["load", "save", "write", "pow_channels", "blur", "width", "height", "get_pixel", "avg", "read"]
+
+        if is_builtin:
+            param_modes = [False] * 10
+        else:
+            param_modes = self.function_metadata.get(name, [])
+
         if ctx.arg_list():
-            for e in ctx.arg_list().expression(): self.visit(e)
+            for i, e in enumerate(ctx.arg_list().expression()):
+                is_ref_param = param_modes[i] if i < len(param_modes) else False
+                
+                if is_ref_param:
+                    var_name = e.getText()
+                    if var_name in self.locals_map:
+                        self.emit(f"ldloca {self.locals_map[var_name]}")
+                    else:
+                        self.visit(e)
+                else:
+                    self.visit(e)
 
         rt = "[ImageLangRuntime]ImageLangRuntime.Ops"
         if name == "load": self.emit(f"call object {rt}::Load(object)")
@@ -296,20 +340,18 @@ class Compiler(ImageLangVisitor):
             if ctx.arg_list(): self.emit("pop")
             self.emit(f"call string [ImageLangRuntime]ImageLangRuntime.StdLib::read_string()")
         else:
-            cnt = len(ctx.arg_list().expression()) if ctx.arg_list() else 0
-            self.emit(f"call object Program::{name}({', '.join(['object']*cnt)})")
+            sig_types = [("object&" if m else "object") for m in param_modes]
+            sig = ", ".join(sig_types)
+            self.emit(f"call object Program::{name}({sig})")
 
     def visitThrow_stmt(self, ctx):
-        # Получаем тип исключения из маппинга
         exc_name = ctx.exception_type().getText()
-        cil_type = self.type_mapping.get(exc_name, "[mscorlib]System.Exception")
+        cil_type = self.type_mapping.get(exc_name, "[mscorlib]System.Exception")    
         
-        # Генерируем сообщение (выражение в скобках)
         self.visit(ctx.expression())
-        # Приводим к строке (на всякий случай)
+        
         self.emit("castclass [mscorlib]System.String")
         
-        # Создаем исключение с сообщением
         self.emit(f"newobj instance void {cil_type}::.ctor(string)")
         self.emit("throw")
 
@@ -320,29 +362,23 @@ class Compiler(ImageLangVisitor):
         self.emit(f"leave {end}")
         self.emit("}")
         
-        # Именованные catch блоки (except ValueError e)
         for exc in ctx.except_clause():
             exc_name = exc.exception_type().getText()
             cil_type = self.type_mapping.get(exc_name, "[mscorlib]System.Exception")
-            
-            self.emit(f"catch {cil_type} {{") # Ловим конкретный тип!
-            
+            self.emit(f"catch {cil_type} {{")     
             if exc.ID():
-                # Исключение на стеке. Берем из него сообщение.
                 self.emit("callvirt instance string [mscorlib]System.Exception::get_Message()")
-                # Сохраняем сообщение в переменную
                 var_name = exc.ID().getText()
                 self.emit(f"stloc {self.locals_map[var_name]}")
             else:
-                self.emit("pop") # Исключение не нужно
+                self.emit("pop") 
                 
             self.visit(exc.block())
             self.emit(f"leave {end}")
             self.emit("}")
             
-        # Default catch block (except { ... })
         if ctx.default_clause():
-            self.emit("catch [mscorlib]System.Object { pop") # Ловим всё остальное
+            self.emit("catch [mscorlib]System.Object { pop") 
             self.visit(ctx.default_clause().block())
             self.emit(f"leave {end}")
             self.emit("}")
@@ -350,15 +386,13 @@ class Compiler(ImageLangVisitor):
         self.emit_label(end)
 
     def visitNeqExpr(self, ctx):
-        # a != b  <=>  !(a == b)
-        self.emit_op(ctx, "Eq")       # Вызываем Ops.Eq -> Boxed Bool
-        self.emit_unbox("bool")       # Распаковываем -> int32 (0 или 1)
-        self.emit("ldc.i4.0")         # Грузим 0
-        self.emit("ceq")              # Сравниваем: (val == 0). Если val был 0 (false), станет 1 (true).
-        self.emit_box_if_needed("bool") # Упаковываем обратно
+        self.emit_op(ctx, "Eq")       
+        self.emit_unbox("bool")       
+        self.emit("ldc.i4.0")         
+        self.emit("ceq")              
+        self.emit_box_if_needed("bool") 
 
     def visitLeExpr(self, ctx):
-        # a <= b  <=>  !(a > b)
         self.emit_op(ctx, "Gt")
         self.emit_unbox("bool")
         self.emit("ldc.i4.0")
@@ -366,7 +400,6 @@ class Compiler(ImageLangVisitor):
         self.emit_box_if_needed("bool")
 
     def visitGeExpr(self, ctx):
-        # a >= b  <=>  !(a < b)
         self.emit_op(ctx, "Lt")
         self.emit_unbox("bool")
         self.emit("ldc.i4.0")
@@ -374,8 +407,6 @@ class Compiler(ImageLangVisitor):
         self.emit_box_if_needed("bool")
 
     def visitAndExpr(self, ctx):
-        # and - логическое И
-        # Ops не имеет And, делаем на месте (распаковываем оба и делаем bitwise and)
         self.visit(ctx.expression(0))
         self.emit_unbox("bool")
         self.visit(ctx.expression(1))
@@ -392,7 +423,6 @@ class Compiler(ImageLangVisitor):
         self.emit_box_if_needed("bool")
         
     def visitNotExpr(self, ctx):
-        # В грамматике это часть unary_expr, но если оно выделено отдельно в visitor:
         self.visit(ctx.expression())
         self.emit_unbox("bool")
         self.emit("ldc.i4.0")
