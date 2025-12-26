@@ -99,7 +99,20 @@ namespace ImageLangRuntime
     public static class StdLib
     {
         public static void write(object obj) => Console.WriteLine(obj?.ToString() ?? "null");
-        public static string read_string() => Console.ReadLine()?.Trim();
+        public static string read_string() => Console.ReadLine()?.Trim() ?? "";
+
+        public static object read_int() {
+            string s = read_string();
+            if (int.TryParse(s, out int res)) return res;
+            return 0;
+        }
+
+        public static object read_float() {
+            string s = read_string().Replace(',', '.');
+            if (double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double res)) 
+                return res;
+            return 0.0;
+        }
 
         public static ImageWrapper load(string path) {
             try { return new ImageWrapper(path); } catch { return null; }

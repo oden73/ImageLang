@@ -312,7 +312,21 @@ class Compiler(ImageLangVisitor):
         elif ctx.func_call(): self.visit(ctx.func_call())
         elif ctx.expression(): self.visit(ctx.expression())
         elif ctx.read_type_call():
-             self.emit("call string [ImageLangRuntime]ImageLangRuntime.StdLib::read_string()")
+            lang_type = ctx.read_type_call().type_().getText()
+            
+            rt = "[ImageLangRuntime]ImageLangRuntime.StdLib"
+            
+            if lang_type == "int":
+                self.emit(f"call object {rt}::read_int()")
+            elif lang_type == "float":
+                self.emit(f"call object {rt}::read_float()")
+            elif lang_type == "bool":
+                self.emit(f"call string {rt}::read_string()")
+                self.emit("ldstr \"true\"")
+                self.emit("call bool [mscorlib]System.String::op_Equality(string, string)")
+                self.emit("box [mscorlib]System.Boolean")
+            else:
+                self.emit(f"call string {rt}::read_string()")
 
     def visitFunc_call(self, ctx):
         name = ctx.ID().getText()
