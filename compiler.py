@@ -18,6 +18,8 @@ class Compiler(ImageLangVisitor):
             "color": "valuetype [ImageLangRuntime]ImageLangRuntime.LangColor"
         }
 
+        self.function_metadata = {}
+
     def get_il(self): return "\n".join(self.il_code)
     
     def emit(self, instr): self.il_code.append(f"    {instr}")
@@ -83,6 +85,21 @@ class Compiler(ImageLangVisitor):
             ".assembly extern ImageLangRuntime {}", ".assembly ImageLangProgram {}",
             ".module program.exe", ".class public auto ansi Program extends [mscorlib]System.Object {"
         ]
+
+        self.function_metadata = {}
+
+        for td in ctx.top_decl():
+            f_ctx = td.func_decl()
+            f_name = f_ctx.ID().getText()
+            param_modes = []
+            if f_ctx.param_list():
+                for p in f_ctx.param_list().param():
+                    is_ref = p.getToken(ImageLangParser.AMP, 0) is not None
+                    param_modes.append(is_ref)
+            
+            # Сохраняем список режимов параметров
+            self.function_metadata[f_name] = param_modes
+
         for td in ctx.top_decl(): self.visit(td)
         self.il_code.append(".method static void Main() cil managed { .entrypoint")
         self.in_main = True
@@ -291,10 +308,21 @@ class Compiler(ImageLangVisitor):
         name = ctx.ID().getText()
         is_builtin = name in ["load", "save", "write", "pow_channels", "blur", "width", "height", "get_pixel", "avg", "read"]
 
+        if is_builtin:
+            param_modes = [False] * 10
+        else:
+            param_modes = self.function_metadata.get(name, [])
+
         if ctx.arg_list():
-            for e in ctx.arg_list().expression():
-                if not is_builtin and e.getText() in self.locals_map:
-                    self.emit(f"ldloca {self.locals_map[e.getText()]}")
+            for i, e in enumerate(ctx.arg_list().expression()):
+                is_ref_param = param_modes[i] if i < len(param_modes) else False
+                
+                if is_ref_param:
+                    var_name = e.getText()
+                    if var_name in self.locals_map:
+                        self.emit(f"ldloca {self.locals_map[var_name]}")
+                    else:
+                        self.visit(e)
                 else:
                     self.visit(e)
 
@@ -312,8 +340,9 @@ class Compiler(ImageLangVisitor):
             if ctx.arg_list(): self.emit("pop")
             self.emit(f"call string [ImageLangRuntime]ImageLangRuntime.StdLib::read_string()")
         else:
-            cnt = len(ctx.arg_list().expression()) if ctx.arg_list() else 0
-            self.emit(f"call object Program::{name}({', '.join(['object']*cnt)})")
+            sig_types = [("object&" if m else "object") for m in param_modes]
+            sig = ", ".join(sig_types)
+            self.emit(f"call object Program::{name}({sig})")
 
     def visitThrow_stmt(self, ctx):
         exc_name = ctx.exception_type().getText()
