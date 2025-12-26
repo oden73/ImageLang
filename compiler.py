@@ -299,6 +299,16 @@ class Compiler(ImageLangVisitor):
             if name in self.locals_map:
                 self.emit(f"ldloc {self.locals_map[name]}")
                 self.emit_box_if_needed(self.locals_type_map[name])
+        if ctx.type_() and ctx.LPAREN():
+            t_name = ctx.type_().getText()
+            if ctx.arg_list():
+                for e in ctx.arg_list().expression():
+                    self.visit(e)
+            if t_name == "color" or t_name == "pixel":
+                self.emit("call object [ImageLangRuntime]ImageLangRuntime.Ops::CreateColor(object, object, object)")
+            elif t_name == "image":
+                self.emit("call object [ImageLangRuntime]ImageLangRuntime.Ops::CreateImage(object, object)")
+            return
         elif ctx.func_call(): self.visit(ctx.func_call())
         elif ctx.expression(): self.visit(ctx.expression())
         elif ctx.read_type_call():

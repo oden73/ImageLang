@@ -179,6 +179,7 @@ primary_base
     | LPAREN expression RPAREN
     | func_call
     | read_type_call
+    | type LPAREN arg_list? RPAREN
     ;
 
 func_call
